@@ -16,7 +16,7 @@ export default defineConfig({
       },
       plugins: [
         NodeGlobalsPolyfillPlugin({
-          buffer: true,
+          buffer: false, // avoid duplicate Buffer declarations in simple-peer
           process: true
         }),
         NodeModulesPolyfillPlugin()  // Required for `stream`, `crypto`, etc.
@@ -25,6 +25,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      buffer: 'buffer/',
+      process: 'process/browser',
       stream: 'stream-browserify',
       crypto: 'crypto-browserify',
       events: 'events/'

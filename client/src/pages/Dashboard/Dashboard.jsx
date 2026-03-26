@@ -65,6 +65,7 @@ const Dashboard = () => {
     socket.on("me", (id) => setMe(id));
     // Listen for "callToUser" event, which means another user is calling the current user.
     socket.on("callToUser", (data) => {
+      console.log("Received callToUser", data);
       setReciveCall(true);  // Set state to indicate an incoming call.
       setCaller(data);      // Store caller's information in state.
       setCallerName(data.name);  // Store caller's name.
@@ -97,6 +98,7 @@ const Dashboard = () => {
     });
     // Listen for "online-users" event, which provides the list of currently online users.
     socket.on("online-users", (onlineUsers) => {
+      console.log("Online users updated:", onlineUsers);
       setUserOnline(onlineUsers); // Update state with the list of online users.
     });
     // Cleanup function: Runs when the component unmounts or dependencies change.
@@ -113,6 +115,17 @@ const Dashboard = () => {
 
 
   const startCall = async () => {
+    if (!modalUser) {
+      alert("No user selected for call.");
+      return;
+    }
+
+    // Keep local check for UX; still proceed and rely on server reply for definitive state.
+    if (!isOnlineUser(modalUser._id)) {
+      console.warn("Call target not in local online-users cache", modalUser._id, userOnline);
+      // do not block the call, server will emit userUnavailable if truly offline
+    }
+
     try {
       // ✅ Request access to the user's media devices (camera & microphone)
       const currentStream = await navigator.mediaDevices.getUserMedia({
@@ -145,6 +158,7 @@ const Dashboard = () => {
       });
       // ✅ Handle the "signal" event (this occurs when the WebRTC handshake is initiated)
       peer.on("signal", (data) => {
+        console.log("Emitting callToUser to", modalUser._id);
         // ✅ Emit a "callToUser" event to the server with necessary call details
         socket.emit("callToUser", {
           callToUserId: modalUser._id, // ✅ ID of the user being called

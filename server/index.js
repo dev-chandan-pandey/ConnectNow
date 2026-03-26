@@ -95,36 +95,58 @@ io.on("connection", (socket) => {
       });
     }
 
+    console.log(`[JOIN] User ${user.id} joined with socket ${socket.id}, onlineUsers count: ${onlineUsers.length}`);
     io.emit("online-users", onlineUsers); // 🔹 Broadcast updated online users list
   });
 
   // 📞 Handle outgoing call request
   socket.on("callToUser", (data) => {
+    console.log(`[CALL] Received callToUser from ${socket.id} to ${data.callToUserId}`);
     const callee = onlineUsers.find((user) => user.userId === data.callToUserId); // Find the user being called
 
     if (!callee) {
+      console.log(`[CALL] User ${data.callToUserId} not found in onlineUsers`);
       socket.emit("userUnavailable", { message: "User is offline." }); // ❌ Notify caller if user is offline
       return;
     }
 
-    // 🚫 If the user is already in another call
-    if (activeCalls.has(data.callToUserId)) {
-      socket.emit("userBusy", { message: "User is currently in another call." });
+    console.log(`[CALL] Found callee: ${callee.userId} with socket ${callee.socketId}`);
 
+    // 🚫 If the user is already in another call
+    if (activeCalls.has(callee.userId)) {
+      console.log(`[CALL] User ${callee.userId} is busy`);
+      socket.emit("userBusy", { message: "User is currently in another call." });
       io.to(callee.socketId).emit("incomingCallWhileBusy", {
         from: data.from,
         name: data.name,
         email: data.email,
         profilepic: data.profilepic,
       });
-
       return;
     }
+
+    // 🔒 Reserve both caller and callee as busy during ringing
+    activeCalls.set(callee.userId, {
+      with: data.from,
+      socketId: callee.socketId,
+      status: "ringing",
+    });
+    const callerUser = onlineUsers.find((user) => user.socketId === data.from);
+    if (callerUser) {
+      activeCalls.set(callerUser.userId, {
+        with: callee.userId,
+        socketId: data.from,
+        status: "calling",
+      });
+    }
+
+    console.log(`[CALL] Emitting callToUser to ${callee.socketId} for user ${callee.userId}`);
 
     // 📞 Emit an event to the receiver's socket (callee)
     io.to(callee.socketId).emit("callToUser", {
       signal: data.signalData, // WebRTC signal data
-      from: data.from, // Caller ID
+      from: data.from, // Caller socket ID
+      callerId: callerUser?.userId,
       name: data.name, // Caller name
       email: data.email, // Caller email
       profilepic: data.profilepic, // Caller profile picture
@@ -133,14 +155,26 @@ io.on("connection", (socket) => {
 
   // 📞 Handle when a call is accepted
   socket.on("answeredCall", (data) => {
+    const caller = onlineUsers.find((user) => user.socketId === data.to);
+    const callee = onlineUsers.find((user) => user.socketId === socket.id);
+
     io.to(data.to).emit("callAccepted", {
       signal: data.signal, // WebRTC signal
-      from: data.from, // Caller ID
+      from: data.from, // Receiver (callee) socket ID
     });
 
-    // 📌 Track active calls in a Map
-    activeCalls.set(data.from, { with: data.to, socketId: socket.id });
-    activeCalls.set(data.to, { with: data.from, socketId: data.to });
+    if (caller && callee) {
+      activeCalls.set(caller.userId, {
+        with: callee.userId,
+        socketId: caller.socketId,
+        status: "in-call",
+      });
+      activeCalls.set(callee.userId, {
+        with: caller.userId,
+        socketId: callee.socketId,
+        status: "in-call",
+      });
+    }
   });
 
   // ❌ Handle call rejection
@@ -157,7 +191,12 @@ io.on("connection", (socket) => {
       name: data.name, // User who ended the call
     });
 
-    // 🔥 Remove call from active calls
+    const caller = onlineUsers.find((user) => user.socketId === data.from || user.userId === data.from);
+    const callee = onlineUsers.find((user) => user.socketId === data.to || user.userId === data.to);
+
+    if (caller) activeCalls.delete(caller.userId);
+    if (callee) activeCalls.delete(callee.userId);
+
     activeCalls.delete(data.from);
     activeCalls.delete(data.to);
   });
